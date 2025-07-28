@@ -36,58 +36,79 @@
 ```py
 from pypsql import Table, Field, Query
 
-# define table
-InventoryCosts = Table('InventoryCosts')
-# define its fields
-TransDate = Field('TransDate', 'text', InventoryCosts)
-ItemRecNumber = Field('ItemRecNumber', 'number', InventoryCosts)
-Quantity = Field('Quantity', 'number', InventoryCosts)
-RecordType = Field('RecordType', 'number', InventoryCosts)
+def main():
+    InventoryCosts = Table('InventoryCosts')
+    TransDate = Field('TransDate', 'text', InventoryCosts)
+    ItemRecNumber = Field('ItemRecNumber', 'number', InventoryCosts)
+    Quantity = Field('Quantity', 'number', InventoryCosts)
+    CostAcctRecNumber = Field('CostAcctRecNumber', 'number', InventoryCosts)
+    RecordType = Field('RecordType', 'number', InventoryCosts)
+    
+    LineItem = Table('LineItem')
+    ItemIsInactive = Field('ItemIsInactive', 'number', LineItem)
+    ItemRecordNumber = Field('ItemRecordNumber', 'number', LineItem)
+    StockingUM = Field('StockingUM', 'text', LineItem)
+    ItemID = Field('ItemID', 'text', LineItem)
 
-# define another table
-LineItem = Table('LineItem')
-# more fields
-ItemIsInactive = Field('ItemIsInactive', 'number', LineItem)
-ItemRecordNumber = Field('ItemRecordNumber', 'number', LineItem)
-
-sql = Query(
-  LineItem
-    .select(ItemRecordNumber, ItemIsInactive)
-    .inner(
-      InventoryCosts
-        .select(ItemRecNumber, TransDate, Quantity, RecordType)
-        .where(RecordType.eq(50))
-    ).on(
-      ItemRecordNumber.eq(ItemRecNumber)
+    sql = Query(
+        LineItem
+            .select(ItemID, StockingUM, ItemIsInactive)
+            .inner(InventoryCosts
+                .select(ItemRecNumber, TransDate, Quantity, CostAcctRecNumber, RecordType)
+                .inner(InventoryCosts
+                    .select(ItemRecNumber, RecordType, TransDate.MAX)
+                    .where(RecordType.eq(50))
+                    .group(ItemRecNumber)
+                ).on(
+                    ItemRecNumber.eq(ItemRecNumber),
+                    TransDate.eq(TransDate.MAX),
+                )
+                .where(RecordType.eq(50))
+            ).on(
+                ItemRecordNumber.eq(ItemRecNumber),
+            )
+            .where(
+                ItemIsInactive.eq(0),
+                CostAcctRecNumber.eq(61),
+            )
+            .order(ItemRecNumber.ASC)
     )
-    .where(ItemIsInactive.eq(0))
-    .order(ItemRecordNumber.ASC)
-)
-
-# The Query() function traverses the query structure
-# automatically handling table aliases and correctly referencing fields
-# in the WHERE and ON clauses.
-print(sql)
+    # The Query() function traverses the query structure
+    # automatically handling table aliases and correctly referencing fields
+    # in the WHERE and ON clauses.
+    print(sql)
 ```
 ```
 SELECT
-lim2.ItemRecordNumber, lim2.ItemIsInactive, irs6.ItemRecNumber, irs6.TransDate, irs6.Quantity, irs6.RecordType
+lim1.ItemID, lim1.StockingUM, lim1.ItemIsInactive, irs4.ItemRecNumber, irs4.TransDate, irs4.Quantity, irs4.CostAcctRecNumber, irs4.RecordType
 FROM
-LineItem lim2
+LineItem lim1
 INNER JOIN (
 SELECT
-irs5.ItemRecNumber, irs5.TransDate, irs5.Quantity, irs5.RecordType
+irs1.ItemRecNumber, irs1.TransDate, irs1.Quantity, irs1.CostAcctRecNumber, irs1.RecordType
 FROM
-InventoryCosts irs5
+InventoryCosts irs1
+INNER JOIN (
+SELECT
+irs2.ItemRecNumber, irs2.RecordType, MAX(irs2.TransDate) AS irs2.MaxTransDate
+FROM
+InventoryCosts irs2
 WHERE
-irs5.RecordType = 50 
-) irs6
+irs2.RecordType = 50 
+GROUP BY
+irs2.ItemRecNumber
+) irs3
 ON
-lim2.ItemRecordNumber = irs6.ItemRecNumber 
+irs1.ItemRecNumber = irs3.ItemRecNumber AND irs1.TransDate = irs3.MaxTransDate 
 WHERE
-lim2.ItemIsInactive = 0 
+irs1.RecordType = 50 
+) irs4
+ON
+lim1.ItemRecordNumber = irs4.ItemRecNumber 
+WHERE
+lim1.ItemIsInactive = 0 AND irs4.CostAcctRecNumber = 61 
 ORDER BY
-lim2.ItemRecordNumber ASC;
+irs4.ItemRecNumber ASC;
 ```
 
 > The below limitations are due to time constraints.
