@@ -8,7 +8,7 @@
 
 ### Why?
 - I am currently building an api interface into an old pervasive sql backend with `FastAPI` and `pyodbc`.
-- Pervasive SQL is very limited compared to other flavors of SQL and this is not directly supported by `SQLAcademy`.
+- Pervasive SQL is very limited compared to other flavors of SQL and this is not directly supported by python ORM's I've come accross.
 - I just needed a simply library to model the database and easily build sql queries.
 
 ### What can it do?
