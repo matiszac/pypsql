@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Literal
+from dataclasses import dataclass
 
 
 class Filter:
@@ -8,29 +9,62 @@ class Filter:
         self.comp_op = comp_op
         self.value = value
 
+@dataclass
+class Order:
+    field: Field
+    direction: Literal['ASC', 'DESC']
+
+    def __post_init__(self):
+        if self.direction not in ('ASC', 'DESC'):
+            raise ValueError(f"Invalid Order direction: {self.direction}")
 
 class Field:
-    def __init__(self, name, type: Literal['number', 'text'], table: Table, is_max=False):
+    def __init__(self, name, type: Literal['number', 'text'], table: Table, create_variations=True):
         self.table = table
-        self.original = None
         self.name = name
         self.type = type
-        self.is_max = is_max
-        if not is_max:
-            self.MAX = Field('Max'+self.name, self.type, self.table, is_max=True)
-            self.MAX.original = self
-        else:
-            self.MAX = None
+        self.MAX = MaxField(self) if create_variations else None
+        self.MIN = MinField(self) if create_variations else None
         self.ASC = (self, f'?.{self.name} ASC')
         self.DESC = (self, f'?.{self.name} DESC')
 
-    def eq(self, value) -> Filter:
-        return Filter(self, '=', value)
-
+    def __eq__(self, other) -> Filter:
+        return Filter(self, '=', other)
+    def __ne__(self, other) -> Filter:
+        return Filter(self, '!=', other)
+    def __lt__(self, other) -> Filter:
+        return Filter(self, '<', other)
+    def __le__(self, other) -> Filter:
+        return Filter(self, '<=', other)
+    def __gt__(self, other) -> Filter:
+        return Filter(self, '>', other)
+    def __ge__(self, other) -> Filter:
+        return Filter(self, '>=', other)
+    
     def resolve(self, alias):
         if self.is_max:
             return f'MAX({alias}.{self.original.name}) AS {alias}.{self.name}'
         return f'{alias}.{self.name}'
+    
+class MaxField(Field):
+    def __init__(self, original: Field):
+        super().__init__(
+            name='Max'+original.name,
+            type=original.type,
+            table=original.table,
+            create_variations=False
+        )
+        self.original = original
+
+class MinField(Field):
+    def __init__(self, original: Field):
+        super().__init__(
+            name='Min'+original.name,
+            type=original.type,
+            table=original.table,
+            create_variations=False
+        )
+        self.original = original
 
 
 class Table:

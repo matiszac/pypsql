@@ -21,19 +21,19 @@ def main():
                 .select(ItemRecNumber, TransDate, Quantity, CostAcctRecNumber, RecordType)
                 .inner(InventoryCosts
                     .select(ItemRecNumber, RecordType, TransDate.MAX)
-                    .where(RecordType.eq(50))
+                    .where(RecordType == 50)
                     .group(ItemRecNumber)
                 ).on(
                     ItemRecNumber.eq(ItemRecNumber),
                     TransDate.eq(TransDate.MAX),
                 )
-                .where(RecordType.eq(50))
+                .where(RecordType == 50)
             ).on(
                 ItemRecordNumber.eq(ItemRecNumber),
             )
             .where(
-                ItemIsInactive.eq(0),
-                CostAcctRecNumber.eq(61),
+                ItemIsInactive == 0,
+                CostAcctRecNumber == 61,
             )
             .order(ItemRecNumber.ASC)
     )
