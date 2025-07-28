@@ -1,54 +1,44 @@
+from pypsql import Table, Field, Query
+
 def main():
-    TransDate = Field('TransDate')
-    ItemRecNumber = Field('ItemRecNumber')
     InventoryCosts = Table('InventoryCosts')
+    TransDate = Field('TransDate', 'text', InventoryCosts)
+    ItemRecNumber = Field('ItemRecNumber', 'number', InventoryCosts)
+    Quantity = Field('Quantity', 'number', InventoryCosts)
+    CostAcctRecNumber = Field('CostAcctRecNumber', 'number', InventoryCosts)
+    RecordType = Field('RecordType', 'number', InventoryCosts)
+    
+    LineItem = Table('LineItem')
+    ItemIsInactive = Field('ItemIsInactive', 'number', LineItem)
+    ItemRecordNumber = Field('ItemRecordNumber', 'number', LineItem)
+    StockingUM = Field('StockingUM', 'text', LineItem)
+    ItemID = Field('ItemID', 'text', LineItem)
 
-    query = InventoryCosts.select(ItemRecNumber, TransDate.MAX).resolve()
-    print(query)
+    q = (
+        LineItem
+            .select(ItemID, StockingUM, ItemIsInactive)
+            .inner(InventoryCosts
+                .select(ItemRecNumber, TransDate, Quantity, CostAcctRecNumber, RecordType)
+                .inner(InventoryCosts
+                    .select(ItemRecNumber, RecordType, TransDate.MAX)
+                    .where(RecordType.eq(50))
+                    .group(ItemRecNumber)
+                ).on(
+                    ItemRecNumber.eq(ItemRecNumber),
+                    TransDate.eq(TransDate.MAX),
+                )
+                .where(RecordType.eq(50))
+            ).on(
+                ItemRecordNumber.eq(ItemRecNumber),
+            )
+            .where(
+                ItemIsInactive.eq(0),
+                CostAcctRecNumber.eq(61),
+            )
+            .order(ItemRecNumber.ASC)
+    )
 
-
-class Field:
-    def __init__(self, name, is_max=False):
-        self.original = None
-        self.name = name
-        self.is_max = is_max
-        if not is_max:
-            self.MAX = Field('Max'+self.name, is_max=True)
-            self.MAX.original = self.name
-        else:
-            self.MAX = None
-
-    def resolve(self, alias):
-        if self.is_max:
-            return f'MAX({alias}.{self.original}) AS {alias}.{self.name}'
-        return f'{alias}.{self.name}'
-
-
-class Table:
-    def __init__(self, name):
-        self.name = name
-
-    def select(self, *fields: Field):
-        return Select(self, *fields)
-
-
-class Select:
-    def __init__(self, calling_table, *fields: Field):
-        self.calling_table = calling_table
-        self.alias = calling_table.name[0:2] + '_a'
-        self.fields = fields
-
-    def resolve(self):
-        query = 'SELECT '
-        if len(self.fields) == 0:
-            query += '* '
-        else:
-            for field in self.fields:
-                query += field.resolve(self.alias) + ', '
-        return query[:-2] + f' FROM {self.calling_table.name} {self.alias}'
-
-
-
+    print(Query(q))
 
 
 
