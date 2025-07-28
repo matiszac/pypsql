@@ -63,4 +63,35 @@ sql = Query(
     .where(ItemIsInactive.eq(0))
     .order(ItemRecordNumber.ASC)
 )
+
+# The Query() function traverses the query structure
+# automatically handling table aliases and correctly referencing fields
+# in the WHERE and ON clauses.
+print(sql)
 ```
+```
+SELECT
+lim2.ItemRecordNumber, lim2.ItemIsInactive, irs6.ItemRecNumber, irs6.TransDate, irs6.Quantity, irs6.RecordType
+FROM
+LineItem lim2
+INNER JOIN (
+SELECT
+irs5.ItemRecNumber, irs5.TransDate, irs5.Quantity, irs5.RecordType
+FROM
+InventoryCosts irs5
+WHERE
+irs5.RecordType = 50 
+) irs6
+ON
+lim2.ItemRecordNumber = irs6.ItemRecNumber 
+WHERE
+lim2.ItemIsInactive = 0 
+ORDER BY
+lim2.ItemRecordNumber ASC;
+```
+
+> The below limitations are due to time constraints.
+### Current Limitations
+- Any fields referenced in WHERE or ON clauses must be included in the SELECT clause.
+- Can only use = conditional.
+- Can only chain condotions with AND. (handled automatically)

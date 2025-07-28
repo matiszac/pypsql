@@ -14,7 +14,7 @@ def main():
     StockingUM = Field('StockingUM', 'text', LineItem)
     ItemID = Field('ItemID', 'text', LineItem)
 
-    q = (
+    sql = Query(
         LineItem
             .select(ItemID, StockingUM, ItemIsInactive)
             .inner(InventoryCosts
@@ -38,7 +38,9 @@ def main():
             .order(ItemRecNumber.ASC)
     )
 
-    print(Query(q))
+    print(sql)
+
+
 
 
 
