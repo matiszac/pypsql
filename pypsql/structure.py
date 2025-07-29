@@ -1,23 +1,26 @@
 from __future__ import annotations
-from typing import Literal, Any
+from typing import Literal, Any, Iterable
 from dataclasses import dataclass, field, InitVar
+from collections import defaultdict
 
 
-class SQLContext:
+
+class AliasManager:
     def __init__(self):
-        self._count = 0
-        self.params: list[Any] = []
         self._aliases: dict[Select | Inner, str] = {}
-    
-    def next_placeholder(self) -> str:
-        self._count += 1
-        return '?'
-    
-    def register_all_aliases(self, node: Select | Inner):
-        self._aliases[node] = node.alias
-        if node.join:
-            self._aliases[node.join] = node.join.alias
-            self.register_all_aliases(node.join.inner_select)
+        self._nodes: list[Select | Inner] = []
+        self._table_ref_count: dict[Table, int] = defaultdict(int)
+
+    def register_alias(self, node: Select | Inner):
+        if not isinstance(node, (Select, Inner)):
+            raise TypeError(f'Invalid AliasManage node type when registering alias: {type(node).__name__}')
+        table: Table = node.calling_table if isinstance(node, Select) else node.inner_select.calling_table
+        self._table_ref_count[table] += 1
+        n = table.name.lower()
+        self._aliases[node] = f'{n[0]}{n[len(n)//2]}{n[-1]}{self._table_ref_count[table]}'
+        # slightly redundent when compared to astnodes
+        # maybe we can merge the context manager with the alias manager and the astnode list.
+        self._nodes.append(node)
     
     def get_alias(self, node: Select | Inner) -> str:
         try:
@@ -25,10 +28,37 @@ class SQLContext:
         except KeyError:
             raise ValueError(f"Unregistered node: {node!r}")
         
+    def merge(self, other: AliasManager):
+        for node in other._nodes:
+            self.register_alias(node)
+            node.alias_manager = self
+        other._aliases = None
+        other._nodes = None
+        other._table_ref_count = None
+
+
+class SQLContext:
+    def __init__(self):
+        self._count = 0 # for posgres params, future impl, not really used atm
+        self.params: list[Any] = []
+        
+    def next_placeholder(self) -> str:
+        self._count += 1
+        return '?'
+
+
 @dataclass(frozen=True, slots=True)
 class ASTNode:
     syntax: Literal['select', 'where', 'group', 'order', 'inner', 'on']
     node: Select | Inner
+
+    def __post_init__(self):
+        if not isinstance(self.syntax, str):
+            raise TypeError(f'Invalid ASTNode syntax type: {type(self.syntax).__name__}')
+        if self.syntax not in ('select', 'where', 'group', 'order', 'inner', 'on'):
+            raise ValueError(f'Invalid ASTNode syntax: {self.syntax}')
+        if not isinstance(self.node, (Select, Inner)):
+            raise TypeError(f'Invalid ASTNode node type: {type(self.node).__name__}')
         
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +69,8 @@ class Filter:
     origin: Select | Inner = field(default=None, init=False)
 
     def set_origin(self, origin: Select | Inner) -> None:
+        if not isinstance(origin, (Select, Inner)):
+            raise TypeError(f'Invalid Filter origin type: {type(origin).__name__}')
         object.__setattr__(self, 'origin', origin)
 
 
@@ -48,8 +80,10 @@ class Order:
     direction: Literal['ASC', 'DESC']
 
     def __post_init__(self):
+        if not isinstance(self.field, Field):
+            raise TypeError(f'Invalid Order field type: {type(self.field).__name__}')
         if self.direction not in ('ASC', 'DESC'):
-            raise ValueError(f"Invalid Order direction: {self.direction}")
+            raise ValueError(f'Invalid Order direction: {self.direction}')
         
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +128,19 @@ class Field:
     def __ge__(self, other) -> Filter:
         return Filter(self, '>=', other)
     
+    def __hash__(self):
+        return hash((self.name, self.table))
+    
+    def is_equal(self, field: Field) -> bool:
+        return (
+            isinstance(field, Field) and
+            self.name == field.name and
+            self.table == field.table
+        )
+    
+    def is_in(self, fields: Iterable[Field]) -> bool:
+        return any(self.is_equal(f) for f in fields)
+    
     def resolve(self, alias: str):
         if isinstance(self, MaxField):
             return f'MAX({alias}.{self.original.name}) AS {alias}.{self.name}'
@@ -133,32 +180,31 @@ class MinField(Field):
         )
         object.__setattr__(inst, 'original', original)
         return inst
+    
 
-
+@dataclass(frozen=True, slots=True)
 class Table:
-    def __init__(self, name):
-        self.name = name
-        self.ref_count = 0
+    name: str
+
     def select(self, *fields: Field):
-        self.ref_count += 1
         return Select(self, *fields)
 
 
 class Select:
     def __init__(self, calling_table: Table, *fields: Field):
         self.calling_table = calling_table
-        n = calling_table.name.lower()
-        # maybe hash and append refcount
-        self.alias = f'{n[0]}{n[len(n)//2]}{n[-1]}{calling_table.ref_count}'
         self.fields = fields
+
+        self.alias_manager: AliasManager = AliasManager()
+        self.alias_manager.register_alias(self)
         self.ast_nodes: list[ASTNode] = [ASTNode('select', self)]
+
         self.wheres = None
         self.group_by = None
         self.order_by = None
         self.join = None
 
     def inner(self, inner_select: Select) -> Inner:
-        inner_select.calling_table.ref_count += 1
         self.join = Inner(self, inner_select)
         return self.join
     
@@ -168,10 +214,10 @@ class Select:
             if self.join is None:
                 f.set_origin(self)
                 continue
-            if f.field in self.join.inner_select.fields:
+            if f.field.is_in(self.join.inner_select.fields):
                 f.set_origin(self.join)
                 continue
-            if f.field in self.fields:
+            if f.field.is_in(self.fields):
                 f.set_origin(self)
                 continue
             if f.field.table == self.calling_table:
@@ -206,13 +252,15 @@ class Select:
 # make Join base class and Inner Subclass
 class Inner:
     def __init__(self, parent_select: Select, inner_select: Select):
-        self.parent_select = parent_select
-        self.inner_select = inner_select
-        n = inner_select.calling_table.name.lower()
-        i = inner_select.calling_table.ref_count
-        self.alias = f'{n[0]}{n[len(n)//2]}{n[-1]}{i}'
+        self.parent_select: Select = parent_select
+        self.inner_select: Select = inner_select
         self.ons = []
-        self.ast_nodes: list[ASTNode] = parent_select.ast_nodes
+
+        self.alias_manager: AliasManager = self.parent_select.alias_manager
+        self.alias_manager.register_alias(self)
+        self.alias_manager.merge(self.inner_select.alias_manager)
+        # ? 
+        self.ast_nodes: list[ASTNode] = self.parent_select.ast_nodes
         self.ast_nodes.append(ASTNode('inner', self))
         self.ast_nodes.extend(inner_select.ast_nodes)
         inner_select.ast_nodes = self.ast_nodes
@@ -234,7 +282,7 @@ def Query(select: Select):
                 sel += '*  '
             else:
                 for field in part_v.fields:
-                    sel += field.resolve(part_v.alias) + ', '
+                    sel += field.resolve(part_v.alias_manager.get_alias(part_v)) + ', '
                 if part_v.join is not None and len(part_v.join.inner_select.fields) > 0:
                     for field in part_v.join.inner_select.fields:
                         if field in part_v.fields:
@@ -242,24 +290,28 @@ def Query(select: Select):
                         if field.is_max and field.original in part_v.fields:
                             continue
                         sel += field.resolve(part_v.join.alias) + ', '
-            sel = sel[0:-2] + f'\nFROM\n{part_v.calling_table.name} {part_v.alias}'
+            sel = sel[0:-2] + f'\nFROM\n{part_v.calling_table.name} {part_v.alias_manager.get_alias(part_v)}'
             if part_v.join is not None:
                 if isinstance(part_v.join, Inner):
                     j = part_v.join
-                    sel += f'\nINNER JOIN (\n?\n) {j.alias}\nON\n'
+                    right_alias = j.alias_manager.get_alias(j)
+                    left_alias = part_v.alias_manager.get_alias(part_v)
+                    sel += f'\nINNER JOIN (\n?\n) {right_alias}\nON\n'
                     for on in j.ons:
                         if isinstance(on.value, Field):
                             sel += (
-                                f'{part_v.alias}.{on.field.name}'
+                                f'{left_alias}.{on.field.name}'
                                 f' {on.comp_op} '
-                                f'{j.alias}.{on.value.name}'
+                                f'{right_alias}.{on.value.name}'
                                 ' AND '
                             )
+                        else:
+                            pass # to-do
                     sel = sel[0:-4]
             if part_v.wheres is not None:
                 sel += '\nWHERE\n'
                 for filter in part_v.wheres:
-                    alias = get_alias(filter.field, part_v, part_v.join)
+                    alias = part_v.alias_manager.get_alias(filter.origin)#get_alias(filter.field, part_v, part_v.join)
                     sel += f'{alias}.{filter.field.name} {filter.comp_op} '
                     if filter.field.type == 'int' or filter.field.type == 'decimal':
                         sel += f'{filter.value} AND '
@@ -267,7 +319,7 @@ def Query(select: Select):
                         sel += f"'{filter.value}' AND "
                 sel = sel[0:-4]
             if part_v.group_by is not None:
-                sel += f'\nGROUP BY\n{part_v.alias}.{part_v.group_by.name}'
+                sel += f'\nGROUP BY\n{part_v.alias_manager.get_alias(part_v)}.{part_v.group_by.name}'
             if part_v.order_by is not None:
                 sel += '\nORDER BY\n'
                 for order in part_v.order_by:
@@ -282,15 +334,15 @@ def Query(select: Select):
     return sql_parts.pop()+';'
 
 
+# still used by order nodes
 def get_alias(field: Field, select: Select, join: Inner):
     if join is None:
-        return select.alias
+        return select.alias_manager.get_alias(select)
     if field in select.fields:
-        return select.alias
+        return select.alias_manager.get_alias(select)
     if field in join.inner_select.fields:
-        return join.alias
+        return join.alias_manager.get_alias(join)
     
-
 def get_parts(s: Select):
     r_stack = [{ 'select': s }]
     if s.join is None:

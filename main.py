@@ -27,6 +27,8 @@ def main():
     # lim1 -> where
     # lim1 -> order
 
+    # now we need to figure out who renders the sql, and who iterates through the ast nodes.
+
     select = (
         LineItem
             .select(ItemID, StockingUM, ItemIsInactive) # select node
@@ -54,8 +56,12 @@ def main():
     )
 
     nodes = select.ast_nodes
-    for node in nodes:
-        print(f'{node.node.alias} -> {node.syntax}')
+    for astn in nodes:
+        alias = astn.node.alias_manager.get_alias(astn.node)
+        print(f'{alias} -> {astn.syntax}')
+    # print('printing root alias manager node list')
+    # for n in select.alias_manager._nodes:
+    #     print(f'node: {id(n)} -> manager: {id(n.alias_manager)}')
 
     #print(Query(select))
 
