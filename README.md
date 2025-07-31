@@ -9,7 +9,7 @@
 ### Inspiration
 - Prompted by a last minute attempt at the [Boot.dev July 2025 Hackathon](blog.boot.dev/news/hackathon-2025/). Spoiler alert, my first draft didn't make the cut.
 - I wanted to make a simple query builder for a pyodbc/fastapi project I am working on.
-- I wanted to attempt making query building simple and elegant which unfortunately meant I had to make assumptions about how certain queries or aggregate use should be resolved. This ultimately limits control but make making simple queries easy.
+- I wanted to attempt making a query builder that was simple and elegant to use which unfortunately meant I had to make assumptions about how queries or aggregate use should be resolved. This ultimately limits control but makes building simple queries easy.
 
 > I didn't realise how big of a scope this would be so it is unlikely that I could continue work on this after I implement most of the functionality of the SELECT statement along with more predecate types.
 
