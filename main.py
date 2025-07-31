@@ -28,8 +28,7 @@ def main():
                     TransDate == TransDate.MAX,
                 )
                 .where(RecordType == 50)
-            )
-            .on(
+            ).on(
                 ItemRecordNumber == ItemRecNumber,
             )
             .where(
